@@ -1,6 +1,8 @@
 <?php
 App::uses('AppModel', 'Model');
 App::uses('GpgTool', 'Tools');
+App::uses('AWSS3Client', 'Tools');
+
 
 /**
  * @property-read array $serverSettings
@@ -1593,6 +1595,20 @@ class Server extends AppModel
 
     public function testForWritableDir($value)
     {
+        if ($value === 'database') {
+            try {
+                $this->query("show columns from attachments");
+                return true;
+            } catch (Exception $err) {
+                return "Unable to save to database: " . $err;
+            }
+        }
+        if (substr($value, 0, 5) === "s3://") {
+            $client = new AWSS3Client();
+            $client->initTool();
+            $resp = $client->headBucket(substr($value, 5));
+            return True;
+        }
         if (substr($value, 0, 7) === "phar://") {
             return 'Phar protocol not allowed.';
         }

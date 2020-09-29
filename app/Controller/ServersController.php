@@ -876,10 +876,12 @@ class ServersController extends AppController
         if ($client) {
             $subm = 'submitted_client_cert';
             $attr = 'client_cert_file';
+            $contentStore = 'client_cert_content';
             $ins  = '_client';
         } else {
             $subm = 'submitted_cert';
             $attr = 'cert_file';
+            $contentStore = 'cert_content';
             $ins  = '';
         }
         if (!$delete) {
@@ -912,6 +914,7 @@ class ServersController extends AppController
             $pemfile = new File($destpath . $id . $ins . '.' . $ext);
             $result = $pemfile->write($pemData);
             $s = $this->Server->read(null, $id);
+            $s['Server'][$contentStore] = $pemData;
             $s['Server'][$attr] = $s['Server']['id'] . $ins . '.' . $ext;
             if ($result) {
                 $this->Server->save($s);
@@ -919,6 +922,7 @@ class ServersController extends AppController
         } else {
             $s = $this->Server->read(null, $id);
             $s['Server'][$attr] = '';
+            $s['Server'][$contentStore] = null;
             $this->Server->save($s);
         }
         return true;

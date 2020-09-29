@@ -1,5 +1,7 @@
 <?php
 
+App::uses('FileAccessTool', 'Tools');
+
 class SyncTool
 {
     /**
@@ -14,11 +16,13 @@ class SyncTool
     {
         $params = ['compress' => true];
         if (!empty($server)) {
-            if (!empty($server[$model]['cert_file'])) {
+            if (!empty($server[$model]['cert_file']) && !empty($server[$model]['cert_content'])) {
                 $params['ssl_cafile'] = APP . "files" . DS . "certs" . DS . $server[$model]['id'] . '.pem';
+                (new FileAccessTool())->writeToFile($params['ssl_cafile'], $server[$model]['cert_content']);
             }
-            if (!empty($server[$model]['client_cert_file'])) {
+            if (!empty($server[$model]['client_cert_file']) && !empty($server[$model]['client_cert_content'])) {
                 $params['ssl_local_cert'] = APP . "files" . DS . "certs" . DS . $server[$model]['id'] . '_client.pem';
+                (new FileAccessTool())->writeToFile($params['ssl_local_cert'], $server[$model]['client_cert_content']);
             }
             if (!empty($server[$model]['self_signed'])) {
                 $params['ssl_allow_self_signed'] = true;
@@ -77,6 +81,10 @@ class SyncTool
     {
         if (!$server['Server']['client_cert_file']) {
             return;
+        }
+
+        if (!empty($server['Server']['client_cert_content'])) {
+            return self::getClientCertificateInfo($server['Server']['client_cert_content']);
         }
 
         $clientCertificate = new File(APP . "files" . DS . "certs" . DS . $server['Server']['id'] . '_client.pem');

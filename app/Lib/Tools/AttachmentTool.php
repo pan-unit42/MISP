@@ -1,5 +1,6 @@
 <?php
 App::uses('AWSS3Client', 'Tools');
+App::uses('Attachment', 'Models');
 
 class AttachmentTool
 {
@@ -8,6 +9,19 @@ class AttachmentTool
 
     /** @var AWSS3Client */
     private $s3client;
+    private $Attachment;
+    private $storageBackend;
+
+    public function __construct() {
+        $this->Attachment = ClassRegistry::init('AttributeAttachment');
+        if ($this->attachmentDirIsS3()) {
+            $this->storageBackend = 's3';
+        } else if ($this->attachmentDirIsDb()) {
+            $this->storageBackend = 'db';
+        } else {
+            $this->storageBackend = 'file';
+        }
+    }
 
     /**
      * @param int $eventId
@@ -34,6 +48,21 @@ class AttachmentTool
     }
 
     /**
+     * @param $op
+     * @param $eventId
+     * @param $attributeId
+     * @return array|int|null
+     */
+    public function getDatabaseAttachment($op, $eventId, $attributeId) {
+        return $this->Attachment->find($op, array(
+            'conditions' => array(
+                'AttributeAttachment.event_id' => $eventId,
+                'AttributeAttachment.attribute_id' => $attributeId
+            )
+        ));
+    }
+
+    /**
      * @param bool $shadow
      * @param int $eventId
      * @param int $attributeId
@@ -43,19 +72,26 @@ class AttachmentTool
      */
     protected function _exists($shadow, $eventId, $attributeId, $path_suffix = '')
     {
-        if ($this->attachmentDirIsS3()) {
-            $s3 = $this->loadS3Client();
-            $path = $this->getPath($shadow, $eventId, $attributeId, $path_suffix);
-            return $s3->exist($path);
-        } else {
-            try {
-                $this->_getFile($shadow, $eventId, $attributeId, $path_suffix);
-            } catch (NotFoundException $e) {
-                return false;
-            }
+        switch ($this->storageBackend) {
+            case 's3':
+                $s3 = $this->loadS3Client();
+                $path = $this->getPath($shadow, $eventId, $attributeId, $path_suffix);
+                $r = $s3->exist($path);
+                break;
+            case 'db':
+                $r = $this->getDatabaseAttachment('count', $eventId, $attributeId) > 0;
+                break;
+            default:
+                try {
+                    $this->_getFile($shadow, $eventId, $attributeId, $path_suffix);
+                    $r = true;
+                } catch (NotFoundException $e) {
+                    $r = false;
+                }
+                break;
         }
 
-        return true;
+        return $r;
     }
 
     /**
@@ -92,18 +128,26 @@ class AttachmentTool
      */
     protected function _getContent($shadow, $eventId, $attributeId, $path_suffix = '')
     {
-        if ($this->attachmentDirIsS3()) {
-            $s3 = $this->loadS3Client();
-            $path = $this->getPath($shadow, $eventId, $attributeId, $path_suffix);
-            return $s3->download($path);
-        } else {
-            $file = $this->_getFile($shadow, $eventId, $attributeId, $path_suffix);
-            $result = $file->read();
-            if ($result === false) {
-                throw new Exception("Could not read file '{$file->path}'.");
-            }
-            return $result;
+        switch ($this->storageBackend) {
+            case 's3':
+                $s3 = $this->loadS3Client();
+                $path = $this->getPath($shadow, $eventId, $attributeId, $path_suffix);
+                $r = $s3->download($path);
+                break;
+            case 'db':
+                $r = $this->getDatabaseAttachment('first', $eventId, $attributeId)['AttributeAttachment']['data'];
+                break;
+            default:
+                $file = $this->_getFile($shadow, $eventId, $attributeId, $path_suffix);
+                $result = $file->read();
+                if ($result === false) {
+                    throw new Exception("Could not read file '{$file->path}'.");
+                }
+                $r = $result;
+                break;
         }
+
+        return $r;
     }
 
     /**
@@ -142,21 +186,35 @@ class AttachmentTool
     {
         $path = $this->getPath($shadow, $eventId, $attributeId, $pathSuffix);
 
-        if ($this->attachmentDirIsS3()) {
-            $s3 = $this->loadS3Client();
-            $content = $s3->download($path);
-
-            $file = new File($this->tempFileName());
-            if (!$file->write($content)) {
-                throw new Exception("Could not write temporary file '{$file->path}'.");
-            }
-
-        } else {
-            $filepath = $this->attachmentDir() . DS . $path;
-            $file = new File($filepath);
-            if (!$file->exists()) {
-                throw new NotFoundException("File '$filepath' does not exists.");
-            }
+        switch ($this->storageBackend) {
+            case 's3':
+                $s3 = $this->loadS3Client();
+                $content = $s3->download($path);
+                $file = new File($this->tempFileName());
+                register_shutdown_function(function() use($file) {
+                    $file->delete();
+                });
+                if (!$file->write($content)) {
+                    throw new Exception("Could not write temporary file '{$file->path}'.");
+                }
+                break;
+            case 'db':
+                $data = $this->getDatabaseAttachment("first", $eventId, $attributeId)["AttributeAttachment"]["data"];
+                $file = new File($this->tempFileName(), true);
+                register_shutdown_function(function() use($file) {
+                    $file->delete();
+                });
+                if (!$data || !$file->write($data)) {
+                    throw new Exception("Could not write temporary file '{$file->path}'.");
+                }
+                break;
+            default:
+                $filepath = $this->attachmentDir() . DS . $path;
+                $file = new File($filepath);
+                if (!$file->exists()) {
+                    throw new NotFoundException("File '$filepath' does not exists.");
+                }
+                break;
         }
 
         return $file;
@@ -201,16 +259,28 @@ class AttachmentTool
     {
         $path = $this->getPath($shadow, $eventId, $attributeId, $pathSuffix);
 
-        if ($this->attachmentDirIsS3()) {
-            $s3 = $this->loadS3Client();
-            $s3->upload($path, $data);
-
-        } else {
-            $path = $this->attachmentDir() . DS . $path;
-            $file = new File($path, true);
-            if (!$file->write($data)) {
-                throw new Exception("Could not save attachment to file '$path'.");
-            }
+        switch ($this->storageBackend) {
+            case 's3':
+                $s3 = $this->loadS3Client();
+                $s3->upload($path, $data);
+                break;
+            case 'db':
+                $this->Attachment->create();
+                $this->Attachment->save(array(
+                    'AttributeAttachment' => array(
+                        'event_id' => $eventId,
+                        'attribute_id' => $attributeId,
+                        'data' => $data
+                    )
+                ));
+                break;
+            default:
+                $path = $this->attachmentDir() . DS . $path;
+                $file = new File($path, true);
+                if (!$file->write($data)) {
+                    throw new Exception("Could not save attachment to file '$path'.");
+                }
+                break;
         }
 
         return true;
@@ -250,23 +320,35 @@ class AttachmentTool
      */
     protected function _delete($shadow, $eventId, $attributeId, $pathSuffix = '')
     {
-        if ($this->attachmentDirIsS3()) {
-            $s3 = $this->loadS3Client();
-            $path = $this->getPath($shadow, $eventId, $attributeId, $pathSuffix);
-            $s3->delete($path);
-        } else {
-            try {
-                $file = $this->_getFile($shadow, $eventId, $attributeId, $pathSuffix);
-            } catch (NotFoundException $e) {
-                return false;
-            }
+        switch ($this->storageBackend) {
+            case 's3':
+                $s3 = $this->loadS3Client();
+                $path = $this->getPath($shadow, $eventId, $attributeId, $pathSuffix);
+                $s3->delete($path);
+                $r = true;
+                break;
+            case 'db':
+                $this->Attachment->deleteAll(array(
+                    'AttributeAttachment.event_id' => $eventId,
+                    'AttributeAttachment.attribute_id' => $attributeId
+                    ), false);
+                $r = true;
+                break;
+            default:
+                try {
+                    $file = $this->_getFile($shadow, $eventId, $attributeId, $pathSuffix);
+                    $r = true;
+                } catch (NotFoundException $e) {
+                    $r = false;
+                }
 
-            if (!$file->delete()) {
-                throw new Exception(__('Delete of file attachment failed. Please report to administrator.'));
-            }
+                if ($r && !$file->delete()) {
+                    throw new Exception(__('Delete of file attachment failed. Please report to administrator.'));
+                }
+                break;
         }
 
-        return true;
+        return $r;
     }
 
     /**
@@ -278,18 +360,24 @@ class AttachmentTool
      */
     public function deleteAll($eventId)
     {
-        if ($this->attachmentDirIsS3()) {
-            $s3 = $this->loadS3Client();
-            $s3->deleteDirectory($eventId);
-        } else {
-            $dirPath = $this->attachmentDir();
+        switch ($this->storageBackend) {
+            case 's3':
+                $s3 = $this->loadS3Client();
+                $s3->deleteDirectory($eventId);
+                break;
+            case 'db':
+                $this->Attachment->deleteAll(array('AttributeAttachment.event_id' => $eventId), false);
+                break;
+            default:
+                $dirPath = $this->attachmentDir();
 
-            foreach (array($dirPath, $dirPath . DS . 'shadow') as $dirPath) {
-                $folder = new Folder($dirPath . DS . $eventId);
-                if ($folder->pwd() && !$folder->delete()) {
-                    throw new Exception("Delete of directory '{$folder->pwd()}' failed: " . implode(', ', $folder->errors()));
+                foreach (array($dirPath, $dirPath . DS . 'shadow') as $dirPath) {
+                    $folder = new Folder($dirPath . DS . $eventId);
+                    if ($folder->pwd() && !$folder->delete()) {
+                        throw new Exception("Delete of directory '{$folder->pwd()}' failed: " . implode(', ', $folder->errors()));
+                    }
                 }
-            }
+                break;
         }
 
         return true;
@@ -426,6 +514,11 @@ class AttachmentTool
     public function attachmentDirIsS3()
     {
         return substr(Configure::read('MISP.attachments_dir'), 0, 2) === "s3";
+    }
+
+    private function attachmentDirIsDb()
+    {
+        return Configure::read('MISP.attachments_dir') === "database";
     }
 
     /**

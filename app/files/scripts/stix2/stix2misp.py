@@ -15,7 +15,7 @@
 #
 #    You should have received a copy of the GNU Affero General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
+import re
 import sys
 import json
 import os
@@ -56,6 +56,7 @@ class StixParser():
         self.tags = set()
         self.galaxy = {}
         self.marking_definition = {}
+        self.report = {}
 
     def handler(self, event, filename, args):
         self.filename = filename
@@ -240,11 +241,11 @@ class StixParser():
                         break
 
     def parse_report(self, event_uuid=None):
-        event_infos = set()
+        event_info = None
         self.misp_event.uuid = event_uuid if event_uuid and len(self.report) > 1 else tuple(self.report.keys())[0]
         for report in self.report.values():
-            if hasattr(report, 'name') and report.name:
-                event_infos.add(report.name)
+            if hasattr(report, 'name') and report.name and not event_info:
+                event_info = report.name
             if hasattr(report, 'labels') and report.labels:
                 for label in report.labels:
                     self.tags.add(label)
@@ -259,10 +260,8 @@ class StixParser():
             if hasattr(report, 'external_references'):
                 for reference in report.external_references:
                     self.misp_event.add_attribute(**{'type': 'link', 'value': reference['url']})
-        if len(event_infos) == 1:
-            self.misp_event.info = event_infos.pop()
-        else:
-            self.misp_event.info = f'Imported with MISP import script for {self.stix_version}'
+        self.misp_event.info = event_info or \
+                               f'Imported with MISP import script for {self.stix_version} from {os.path.basename(self.filename)}'
 
     @staticmethod
     def _parse_user_account_groups(groups):
@@ -1998,9 +1997,9 @@ class ExternalStixParser(StixParser):
     def get_type_and_value_from_pattern(pattern):
         pattern = pattern.strip('[]')
         try:
-            pattern_type, pattern_value = pattern.split(' = \'')
+            pattern_type, pattern_value = re.split(r" (?:=|LIKE) '", pattern)
         except ValueError:
-            pattern_type, pattern_value = pattern.split('=')
+            pattern_type, pattern_value = re.split(r"(?:=|LIKE)", pattern)
         return pattern_type.strip(), pattern_value.strip("'")
 
     def handle_import_case(self, stix_object, attributes, name, _force_object=False):
@@ -2061,7 +2060,7 @@ def from_misp(stix_objects):
 def main(args):
     filename = Path(os.path.dirname(args[0]), args[1])
     with open(filename, 'rt', encoding='utf-8') as f:
-        event = stix2.parse(f.read(), allow_custom=True, interoperability=True)
+        event = stix2.parse(f.read(), allow_custom=True)
     stix_parser = StixFromMISPParser() if from_misp(event.objects) else ExternalStixParser()
     stix_parser.handler(event, filename, args[2:])
     stix_parser.save_file()

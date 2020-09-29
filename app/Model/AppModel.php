@@ -1487,7 +1487,7 @@ class AppModel extends Model
                 $sqlArray[] = "ALTER TABLE `galaxy_clusters` ADD `extends_uuid` varchar(40) COLLATE utf8_bin DEFAULT '';";
                 $sqlArray[] = "ALTER TABLE `galaxy_clusters` ADD `extends_version` int(11) DEFAULT 0;";
                 $sqlArray[] = "ALTER TABLE `galaxy_clusters` ADD `published` tinyint(1) NOT NULL DEFAULT 0;";
-                $sqlArray[] = "ALTER TABLE `galaxy_clusters` ADD `deleted` TINYINT(1) NOT NULL DEFAULT 0";
+                $sqlArray[] = "ALTER TABLE `galaxy_clusters` ADD `deleted` TINYINT(1) NOT NULL DEFAULT 0;";
                 $sqlArray[] = "ALTER TABLE `roles` ADD `perm_galaxy_editor` tinyint(1) NOT NULL DEFAULT 0;";
 
                 $sqlArray[] = "UPDATE `roles` SET `perm_galaxy_editor`=1 WHERE `perm_tag_editor`=1;";
@@ -1567,6 +1567,15 @@ class AppModel extends Model
                     PRIMARY KEY (`id`),
                     INDEX `value` (`value`(255))
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+                $sqlArray[] = "ALTER TABLE `servers` ADD COLUMN `client_cert_content` text DEFAULT NULL;";
+                $sqlArray[] = "ALTER TABLE `servers` ADD COLUMN `cert_content` text DEFAULT NULL;";
+                $sqlArray[] = "CREATE TABLE IF NOT EXISTS `attachments` (
+                    `id`           int(11) PRIMARY KEY AUTO_INCREMENT,
+                    `attribute_id` int(11) NOT NULL,
+                    `event_id`     int(11) NOT NULL,
+                    `data`         mediumtext,
+                    UNIQUE (`attribute_id`, `event_id`)
+                ) ENGINE = InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;";
                 break;
             case 66:
                 $sqlArray[] = "ALTER TABLE `galaxy_clusters` MODIFY COLUMN `tag_name` varchar(255) COLLATE utf8_unicode_ci NOT NULL DEFAULT '';";

@@ -68,6 +68,16 @@ CREATE TABLE IF NOT EXISTS `attributes` (
   UNIQUE INDEX `uuid` (`uuid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
+
+CREATE TABLE IF NOT EXISTS `attachments` (
+    `id` int(11) PRIMARY KEY AUTO_INCREMENT,
+    `attribute_id` int(11) NOT NULL,
+    `event_id` int(11) NOT NULL,
+    `data` mediumtext,
+    UNIQUE (`attribute_id`, `event_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+
+
 -- -------------------------------------------------------
 
 --
@@ -462,6 +472,16 @@ CREATE TABLE IF NOT EXISTS `galaxy_clusters` (
   `source` varchar(255) COLLATE utf8_bin NOT NULL DEFAULT '',
   `authors` text COLLATE utf8_bin NOT NULL,
   `version` int(11) DEFAULT 0,
+  `distribution` tinyint(4) NOT NULL DEFAULT 0,
+  `sharing_group_id` int(11),
+  `org_id` int(11) NOT NULL,
+  `orgc_id` int(11) NOT NULL,
+  `default` tinyint(1) NOT NULL DEFAULT 0,
+  `locked` tinyint(1) NOT NULL DEFAULT 0,
+  `extends_uuid` varchar(40) COLLATE utf8_bin DEFAULT '',
+  `extends_version` int(11) DEFAULT 0,
+  `published` tinyint(1) NOT NULL DEFAULT 0,
+  `deleted` TINYINT(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (id),
   INDEX `value` (`value`(255)),
   INDEX `uuid` (`uuid`),
@@ -492,22 +512,40 @@ CREATE TABLE IF NOT EXISTS `galaxy_elements` (
 -- -------------------------------------------------------
 
 --
--- Table structure for `galaxy_reference`
+-- Table structure for `galaxy_cluster_relations`
 --
 
-CREATE TABLE IF NOT EXISTS `galaxy_reference` (
+CREATE TABLE IF NOT EXISTS `galaxy_cluster_relations` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `galaxy_cluster_id` int(11) NOT NULL,
   `referenced_galaxy_cluster_id` int(11) NOT NULL,
   `referenced_galaxy_cluster_uuid` varchar(255) COLLATE utf8_bin NOT NULL,
   `referenced_galaxy_cluster_type` text COLLATE utf8_bin NOT NULL,
-  `referenced_galaxy_cluster_value` text COLLATE utf8_bin NOT NULL,
+  `galaxy_cluster_uuid` varchar(40) COLLATE utf8_bin NOT NULL,
+  `distribution` tinyint(4) NOT NULL DEFAULT 0,
+  `sharing_group_id` int(11),
+  `default` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (id),
   INDEX `galaxy_cluster_id` (`galaxy_cluster_id`),
   INDEX `referenced_galaxy_cluster_id` (`referenced_galaxy_cluster_id`),
-  INDEX `referenced_galaxy_cluster_value` (`referenced_galaxy_cluster_value`(255)),
   INDEX `referenced_galaxy_cluster_type` (`referenced_galaxy_cluster_type`(255))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
+CREATE TABLE IF NOT EXISTS `galaxy_cluster_relation_tags` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `galaxy_cluster_relation_id` int(11) NOT NULL,
+  `tag_id` int(11) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE IF NOT EXISTS `galaxy_cluster_blocklists` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `cluster_uuid` varchar(40) COLLATE utf8_bin NOT NULL,
+  `created` datetime NOT NULL,
+  `cluster_info` TEXT CHARACTER SET utf8 COLLATE utf8_unicode_ci NOT NULL,
+  `comment` TEXT CHARACTER SET utf8 COLLATE utf8_unicode_ci,
+  `cluster_orgc` VARCHAR(255) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL,
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
 CREATE TABLE IF NOT EXISTS inbox (
@@ -906,6 +944,7 @@ CREATE TABLE IF NOT EXISTS `roles` (
   `perm_decaying` tinyint(1) NOT NULL DEFAULT 0,
   `enforce_rate_limit` tinyint(1) NOT NULL DEFAULT 0,
   `rate_limit_count` int(11) NOT NULL DEFAULT 0,
+  `perm_galaxy_editor` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
@@ -924,6 +963,8 @@ CREATE TABLE IF NOT EXISTS `servers` (
   `push` tinyint(1) NOT NULL,
   `pull` tinyint(1) NOT NULL,
   `push_sightings` tinyint(1) NOT NULL DEFAULT 0,
+  `push_galaxy_clusters` tinyint(1) NOT NULL DEFAULT 0,
+  `pull_galaxy_clusters` tinyint(1) NOT NULL DEFAULT 0,
   `lastpulledid` int(11) DEFAULT NULL,
   `lastpushedid` int(11) DEFAULT NULL,
   `organization` varchar(10) COLLATE utf8_bin DEFAULT NULL,
@@ -934,7 +975,9 @@ CREATE TABLE IF NOT EXISTS `servers` (
   `pull_rules` text COLLATE utf8_bin NOT NULL,
   `push_rules` text COLLATE utf8_bin NOT NULL,
   `cert_file` varchar(255) COLLATE utf8_bin DEFAULT NULL,
+  `cert_content` text DEFAULT NULL,
   `client_cert_file` varchar(255) COLLATE utf8_bin DEFAULT NULL,
+  `client_cert_content` text DEFAULT NULL,
   `internal` tinyint(1) NOT NULL DEFAULT 0,
   `skip_proxy` tinyint(1) NOT NULL DEFAULT 0,
   `caching_enabled` tinyint(1) NOT NULL DEFAULT 0,
@@ -948,7 +991,7 @@ CREATE TABLE IF NOT EXISTS `servers` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table ``)ributes`
+-- Table structure for table `shadow_attributes`
 --
 
 CREATE TABLE IF NOT EXISTS `shadow_attributes` (
@@ -1165,6 +1208,8 @@ CREATE TABLE IF NOT EXISTS `tags` (
   `user_id` int(11) NOT NULL DEFAULT 0,
   `hide_tag` tinyint(1) NOT NULL DEFAULT 0,
   `numerical_value` int(11) NULL,
+  `is_galaxy` tinyint(1) NOT NULL DEFAULT 0,
+  `is_custom_galaxy` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
   INDEX `name` (`name`(255)),
   INDEX `org_id` (`org_id`),
@@ -1473,12 +1518,32 @@ CREATE TABLE IF NOT EXISTS `warninglist_types` (
 
 -- --------------------------------------------------------
 
+CREATE TABLE IF NOT EXISTS `cerebrates` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(191) NOT NULL,
+  `url` varchar(255) NOT NULL,
+  `authkey` varchar(40) CHARACTER SET ascii COLLATE ascii_general_ci NULL,
+  `open` tinyint(1) DEFAULT 0,
+  `org_id` int(11) NOT NULL,
+  `pull_orgs` tinyint(1) DEFAULT 0,
+  `pull_sharing_groups` tinyint(1) DEFAULT 0,
+  `self_signed` tinyint(1) DEFAULT 0,
+  `cert_file` varchar(255) DEFAULT NULL,
+  `client_cert_file` varchar(255) DEFAULT NULL,
+  `internal` tinyint(1) NOT NULL DEFAULT 0,
+  `skip_proxy` tinyint(1) NOT NULL DEFAULT 0,
+  `description` text,
+  PRIMARY KEY (`id`),
+  KEY `url` (`url`),
+  KEY `org_id` (`org_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 --
 -- Default values for initial installation
 --
 
 INSERT IGNORE INTO `admin_settings` (`id`, `setting`, `value`) VALUES
-(1, 'db_version', '61');
+(1, 'db_version', '64');
 
 INSERT IGNORE INTO `feeds` (`id`, `provider`, `name`, `url`, `distribution`, `default`, `enabled`) VALUES
 (1, 'CIRCL', 'CIRCL OSINT Feed', 'https://www.circl.lu/doc/misp/feed-osint', 3, 1, 0),
